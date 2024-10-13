@@ -147,7 +147,7 @@ export class RuneMainWallet extends BtcWallet {
             // first output is rune change
             let runeChange = {
                 address: clonedParamData.address,
-                amount: 546
+                amount: clonedParamData.runeData?.outputAmount ||  546,
             }
             updateOutputs.push(runeChange)
             outputIndex++;
@@ -206,7 +206,7 @@ export class RuneMainWallet extends BtcWallet {
         }
     }
 
-    getMockMinRuneTx(paramData:any,curRuneInfo:any): utxoTx {
+    getMockMinRuneTx(paramData:any,curRuneInfo:any, toAddress: string | undefined = undefined): utxoTx {
         const clonedParamData = cloneObject(paramData)
         const typedEdicts: bitcoin.Edict[] = []
         // console.log(curRuneInfo)
@@ -227,8 +227,8 @@ export class RuneMainWallet extends BtcWallet {
             }],
             // @ts-ignore
             outputs: [{
-                address:clonedParamData.address,
-                amount:546,
+                address:toAddress ||clonedParamData.address,
+                amount:clonedParamData.runeData?.outputAmount ||  546,
                 data:curRuneInfo
             }],
             address: clonedParamData.address,
@@ -300,7 +300,8 @@ export class RuneMainWallet extends BtcWallet {
                 baseMintTx.outputs.push(opMintReturnOutput as never)
                 txHex = signBtc(baseMintTx, privateKey, network);
                 // console.log(txHex)
-                const baseMintfee = bitcoin.estimateBtcFee(baseMintTx, this.network()) + 546;
+                const outputAmount = param.data.runeData?.outputAmount ||  546
+                const baseMintfee = bitcoin.estimateBtcFee(baseMintTx, this.network()) + outputAmount;
 
                 // Continue to generate split transactions for batch Mint
                 const runeTx = this.convert2RuneTx(param.data);
@@ -330,7 +331,7 @@ export class RuneMainWallet extends BtcWallet {
                     }
                     let curOutput = {
                         address: param.data.address,
-                        amount: 546
+                        amount: outputAmount
                     }
                     batchMintStatNum += 1
                     let curSubTx = this.getMinRuneTx(param.data, mintData, curInput, curOutput)
@@ -353,6 +354,7 @@ export class RuneMainWallet extends BtcWallet {
                 if (!param.data.runeData) {
                     return Promise.reject("missing runeData");
                 }
+                const totalInputAmount = param.data.inputs.reduce((acc: number, input: any) => acc + input.amount, 0);
                 let mintData = {
                     id: param.data.outputs[0].data.id,
                     amount: 1,
@@ -362,7 +364,8 @@ export class RuneMainWallet extends BtcWallet {
                 const opMintReturnOutput = buildRuneMainMintOp(mintData.id,false,0,true);
                 baseMintTx.outputs.push(opMintReturnOutput as never)
                 const baseMintfee = bitcoin.estimateBtcFee(baseMintTx, this.network()) ;
-                let curAmount =  (mintData.mintNum-1) * baseMintfee + 546
+                const outputAmount = param.data.runeData?.outputAmount ||  546
+                let curAmount =  totalInputAmount - baseMintfee
 
                 const runeTx = this.convert2RuneTxSerialMint(param.data,curAmount);
                 runeTx.outputs.push(opMintReturnOutput as never)
@@ -371,7 +374,7 @@ export class RuneMainWallet extends BtcWallet {
                 let parentTxId = Transaction.fromHex(txHex).getId();
                 txHexs.push(txHex)
 
-                for (let i = 1; i < mintData.mintNum ; i++) {
+                for (let i = 1; i < mintData.mintNum -1 ; i++) {
                     let curInput = {
                         txId: parentTxId,
                         vOut: 0,
@@ -390,6 +393,18 @@ export class RuneMainWallet extends BtcWallet {
                     parentTxId = Transaction.fromHex(curSubTxHex).getId();
                     txHexs.push(curSubTxHex)
                 }
+                const finalTx = this.getMinRuneTx(param.data, mintData, {
+                    txId: parentTxId,
+                    vOut: 0,
+                    address: param.data.address,
+                    amount: curAmount
+                }, {
+                    address: param.data.runeData?.toAddress || param.data.address,
+                    amount: outputAmount
+                })
+                finalTx.outputs.push(opMintReturnOutput as never)
+                let finalTxHex = signBtc(finalTx, privateKey, network);
+                txHexs.push(finalTxHex)
                 return  txHexs
             }
             catch (e) {
@@ -477,6 +492,8 @@ export class RuneMainWallet extends BtcWallet {
                 if (!param.data.runeData) {
                     return Promise.reject("missing runeData");
                 }
+                //遍历所有的input 求出总的input金额
+                const totalInputAmount = param.data.inputs.reduce((acc: number, input: any) => acc + input.amount, 0);
                 let mintData = {
                     id: param.data.outputs[0].data.id,
                     amount: 1,
@@ -486,15 +503,29 @@ export class RuneMainWallet extends BtcWallet {
                 const opMintReturnOutput = buildRuneMainMintOp(mintData.id,false,0,true);
                 baseMintTx.outputs.push(opMintReturnOutput as never)
                 const baseMintfee = bitcoin.estimateBtcFee(baseMintTx, this.network()) ;
-                let curAmount =  (mintData.mintNum-1) * baseMintfee + 546
+                const outputAmount = param.data.runeData?.outputAmount ||  546
+                // 这里需要的是 input 和 2个 output (一个是带有余额的 mint 输出,一个是return output) 但是 estimateBtcFee的时候 由于gas费用大于 546 ,内部判断有bug,所以直接减去 546 这样 inputs - outputs
+                let curAmount =  totalInputAmount - 546
 
                 const runeTx = this.convert2RuneTxSerialMint(param.data,curAmount);
                 runeTx.outputs.push(opMintReturnOutput as never)
                 let fee = bitcoin.estimateBtcFee(runeTx,network)
                 fees.push(fee)
-                for (let i = 1; i < mintData.mintNum ; i++) {
+                for (let i = 1; i < mintData.mintNum -1 ; i++) {
                     fees.push(baseMintfee)
                 }
+                let finalTx = this.getMinRuneTx(param.data, mintData, {
+                    txId: param.data.inputs[0].txId,
+                    vOut: 0,
+                    address: param.data.address,
+                    amount: totalInputAmount
+                }, {
+                    address: param.data.runeData?.toAddress || param.data.address,
+                    amount: outputAmount
+                })
+                finalTx.outputs.push(opMintReturnOutput as never)
+                const toMintFee = bitcoin.estimateBtcFee(finalTx, this.network())
+                fees.push(toMintFee)
                 return Promise.resolve(fees);
             }
         } catch (e) {
@@ -561,7 +592,7 @@ export class RuneMainWallet extends BtcWallet {
             runeTx.outputs.push(opReturnOutput as never)
             let fakeAddr = "KwdkfXMV2wxDVDMPPuFZsio3NeCskAUd4N2U4PriTgpj2MqAGmmc"
             if (runeTx.dustSize == undefined){
-                runeTx.dustSize = 546
+                runeTx.dustSize = (param.data.runeData?.outputAmount || 546) as number
             }
             let {
                 inputAmount,

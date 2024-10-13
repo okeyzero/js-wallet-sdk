@@ -6,7 +6,9 @@ import {
     psbtSign,
     psbtSignImpl,
     RuneTestWallet,
-    TBtcWallet
+    TBtcWallet,
+    Transaction,
+    RuneMainWallet
 } from "../src"
 import {buildRuneMainMintData, fromVarInt, toVarInt, toVarIntV2} from "../src/rune"
 import {SignTxParams} from "@okxweb3/coin-base";
@@ -21,6 +23,7 @@ import {
 } from "../src/runesMain";
 import {testnet} from "../src/bitcoinjs-lib/networks";
 import {base26Decode, base26Encode, getSpacersVal, removeSpacers} from "../src/runestones";
+
 describe('rune test', () => {
 
     test("test buildRuneMainDeployData", async () => {
@@ -361,6 +364,55 @@ describe('rune test', () => {
         expect(tx[0]).toMatch(partial)
         const partial2 = /^02000000000101757fb2398cf0673ca0b3cfdee548d2c7c14ab7b8941760b1a6a891bee77e21b60000000000ffffffff022202000000000000225120017025cd99f6f10d1a608c274a6987d12140e59b81f29d43a47030cb9821436700000000000000000a6a5d0714e1a43314b7100140.*/
         expect(tx[4]).toMatch(partial2)
+    });
+
+    test("serial mint rune fixed", async () => {
+        let wallet = new RuneMainWallet()
+        let runeTxParams= {
+            inputs: [
+                {
+                    txId: "540d8ad5883e57d8ac6838b36a50b933c4bf4120f4244e778ec45e0b08d1047b",
+                    vOut: 2,
+                    amount: 795490,
+                    address: "bc1p5z0mnw23dg9zyn9w5e9aj6rynhxvaf7cvz46g3ed3yky7e4tjuyqgeq3gr",
+                    data: [{"id": "98978:64"}]
+                }
+            ],
+            outputs: [
+                { // rune send output
+                    address: "bc1p5z0mnw23dg9zyn9w5e9aj6rynhxvaf7cvz46g3ed3yky7e4tjuyqgeq3gr",
+                    amount: 1000,
+                    data:  {"id": "98978:64"}
+                },
+            ],
+            address: "bc1p5z0mnw23dg9zyn9w5e9aj6rynhxvaf7cvz46g3ed3yky7e4tjuyqgeq3gr",
+            feePerB: 1,
+            runeData: {
+                "serialMint" : true,
+                "mint": true,
+                "mintNum": 25,
+                "outputAmount": 330,
+                "toAddress": "bc1qwz5gl95hw09xcgsdelha2qe4fukzgyk6ttxlfc"
+            }
+        };
+        let signParams: SignTxParams = {
+            privateKey: "KwdkfXMV2wxDVDMPPuFZsio3NeCskAUd4N2U4PriTgpj2MqAGmmc",
+            data: runeTxParams
+        };
+        let fee = await wallet.estimateFee(signParams)
+        console.log(fee)
+        const totalFee = fee.reduce((a:number, b:number) => a + b, 0)
+        console.log(totalFee)
+        let tx = await wallet.signTransaction(signParams);
+        console.info(tx)
+
+        const hashes = []
+        for (let i = 0; i < tx.length; i++) {
+            let txHash = Transaction.fromHex(tx[i]).getId();
+            hashes.push(txHash)
+        }
+        console.log(hashes)
+
     });
 
     test("varint full", () => {

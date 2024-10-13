@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "okx js sdk for web3",
   "main": "index.js",
-  "scripts": {},
   "author": "",
   "license": "MIT",
   "files": [
@@ -19,7 +18,5 @@
     "ts-jest": "^27.1.4",
     "ts-node": "^10.9.2",
     "typescript": "^4.6.2"
-  },
-  "dependencies": {
   }
 }
